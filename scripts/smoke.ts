@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import { DEMO_EMAIL, DEMO_PASSWORD, seedDemoAccount } from '../server/seed.ts';
 import { initDatabase } from '../server/db.ts';
@@ -51,14 +52,40 @@ async function main() {
   let child: ChildProcess | null = null;
 
   try {
-    const alreadyRunning = await isServerHealthy(baseUrl);
+    let alreadyRunning = await isServerHealthy(baseUrl);
+    if (!alreadyRunning && (baseUrl === 'http://localhost:3000' || !process.env.SMOKE_BASE_URL)) {
+      if (await isServerHealthy('http://127.0.0.1:3000')) {
+        baseUrl = 'http://127.0.0.1:3000';
+        alreadyRunning = true;
+      }
+    }
     if (!alreadyRunning) {
       const port = await findFreePort();
       baseUrl = `http://127.0.0.1:${port}`;
       console.log(`[smoke] Starting local server on ${baseUrl}...`);
-      child = spawn('npx', ['tsx', 'server.ts'], {
-        env: { ...process.env, PORT: String(port), APP_URL: baseUrl },
-        stdio: ['ignore', 'pipe', 'pipe'],
+
+      let tsxCli: string | null = null;
+      try {
+        const req = createRequire(import.meta.url);
+        tsxCli = req.resolve('tsx/cli');
+      } catch {
+        // Fallback if tsx/cli cannot be resolved
+      }
+
+      if (tsxCli) {
+        child = spawn(process.execPath, [tsxCli, 'server.ts'], {
+          env: { ...process.env, PORT: String(port), APP_URL: baseUrl },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } else {
+        child = spawn('npx', ['tsx', 'server.ts'], {
+          env: { ...process.env, PORT: String(port), APP_URL: baseUrl },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+        });
+      }
+      child.on('error', (err) => {
+        console.error(`[smoke] Server spawn error: ${err.message}`);
       });
       child.stdout?.on('data', (chunk) => process.stdout.write(`[server] ${chunk}`));
       child.stderr?.on('data', (chunk) => process.stderr.write(`[server-err] ${chunk}`));
