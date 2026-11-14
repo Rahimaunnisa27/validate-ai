@@ -1,0 +1,6 @@
+{
+  "name": "VenturePilot AI",
+  "description": "Turn a business idea into a validated, structured, actionable startup plan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
