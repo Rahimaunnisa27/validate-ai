@@ -98,32 +98,150 @@ async function main() {
     const db = initDatabase();
     await seedDemoAccount(db);
 
+    const cookieJar = new Map<string, string>();
+    let currentAccessToken: string | null = null;
+    const authHeaders: Record<string, string> = {};
+
+    function updateCookiesFromResponse(res: Response): void {
+      const setCookies =
+        typeof res.headers.getSetCookie === 'function'
+          ? res.headers.getSetCookie()
+          : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')!] : []);
+      for (const c of setCookies) {
+        const [nameVal] = c.split(';');
+        const eqIdx = nameVal.indexOf('=');
+        if (eqIdx !== -1) {
+          const name = nameVal.slice(0, eqIdx).trim();
+          const val = nameVal.slice(eqIdx + 1).trim();
+          cookieJar.set(name, val);
+        }
+      }
+    }
+
+    function syncAuthHeaders(): void {
+      const cookies = Array.from(cookieJar.entries())
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; ');
+      if (cookies) {
+        authHeaders['Cookie'] = cookies;
+      }
+      if (currentAccessToken) {
+        authHeaders['Authorization'] = `Bearer ${currentAccessToken}`;
+      }
+    }
+
+    async function loginDemoUser(): Promise<{ accessToken?: string; user?: { email?: string } }> {
+      const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: DEMO_EMAIL, password: DEMO_PASSWORD }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(`Login failed (HTTP ${res.status}): ${text}`);
+      }
+      updateCookiesFromResponse(res);
+      const data = JSON.parse(text) as { accessToken?: string; user?: { email?: string } };
+      if (data.accessToken) {
+        currentAccessToken = data.accessToken;
+      }
+      syncAuthHeaders();
+      return data;
+    }
+
+    async function refreshTokenOrRelogin(): Promise<boolean> {
+      // 1. Try POST /api/v1/auth/refresh
+      try {
+        const refreshHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        const cookies = Array.from(cookieJar.entries())
+          .map(([k, v]) => `${k}=${v}`)
+          .join('; ');
+        if (cookies) {
+          refreshHeaders['Cookie'] = cookies;
+        }
+        const res = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
+          method: 'POST',
+          headers: refreshHeaders,
+        });
+        if (res.ok) {
+          updateCookiesFromResponse(res);
+          const data = (await res.json()) as { accessToken?: string };
+          if (data.accessToken) {
+            currentAccessToken = data.accessToken;
+          }
+          syncAuthHeaders();
+          console.log('[smoke]    (Token expired: refreshed session via POST /api/v1/auth/refresh)');
+          return true;
+        }
+      } catch {
+        // Refresh failed, fall back to login below
+      }
+
+      // 2. If refresh fails, log in again as demo user
+      try {
+        await loginDemoUser();
+        console.log('[smoke]    (Token expired: refresh failed, re-authenticated via POST /api/v1/auth/login)');
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    async function apiFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
+      function getCombinedHeaders(): Record<string, string> {
+        const reqHeaders: Record<string, string> = {};
+        if (init.headers) {
+          if (init.headers instanceof Headers) {
+            init.headers.forEach((v, k) => {
+              reqHeaders[k] = v;
+            });
+          } else if (Array.isArray(init.headers)) {
+            for (const [k, v] of init.headers) {
+              reqHeaders[k] = v;
+            }
+          } else {
+            Object.assign(reqHeaders, init.headers);
+          }
+        }
+        Object.assign(reqHeaders, authHeaders);
+        return reqHeaders;
+      }
+
+      let res = await fetch(input, { ...init, headers: getCombinedHeaders() });
+      updateCookiesFromResponse(res);
+
+      if (res.status === 401) {
+        let isExpired = false;
+        try {
+          const cloned = res.clone();
+          const body = (await cloned.json()) as { error?: { code?: string } };
+          if (body?.error?.code === 'TOKEN_EXPIRED') {
+            isExpired = true;
+          }
+        } catch {
+          // Response body was not JSON
+        }
+
+        if (isExpired) {
+          const refreshed = await refreshTokenOrRelogin();
+          if (refreshed) {
+            res = await fetch(input, { ...init, headers: getCombinedHeaders() });
+            updateCookiesFromResponse(res);
+          }
+        }
+      }
+
+      return res;
+    }
+
     // 1. Login as demo founder
     console.log(`[smoke] 1. Logging in as ${DEMO_EMAIL}...`);
-    const loginRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: DEMO_EMAIL, password: DEMO_PASSWORD }),
-    });
-    const loginText = await loginRes.text();
-    if (!loginRes.ok) {
-      throw new Error(`Login failed (HTTP ${loginRes.status}): ${loginText}`);
-    }
-    const loginData = JSON.parse(loginText) as { accessToken?: string; user?: { email?: string } };
-    const setCookies =
-      typeof loginRes.headers.getSetCookie === 'function'
-        ? loginRes.headers.getSetCookie()
-        : [];
-    const cookieHeader = setCookies.map((c) => c.split(';')[0]).join('; ');
-    const authHeaders: Record<string, string> = {};
-    if (cookieHeader) authHeaders['Cookie'] = cookieHeader;
-    if (loginData.accessToken) authHeaders['Authorization'] = `Bearer ${loginData.accessToken}`;
-
-    console.log(`[smoke]    Logged in as ${loginData.user?.email} (cookies=${setCookies.length}, bearer=${Boolean(loginData.accessToken)})`);
+    const loginData = await loginDemoUser();
+    console.log(`[smoke]    Logged in as ${loginData.user?.email} (cookies=${cookieJar.size}, bearer=${Boolean(loginData.accessToken)})`);
 
     // 2. Fetch submitted ideas
     console.log('[smoke] 2. Fetching submitted ideas...');
-    const ideasRes = await fetch(`${baseUrl}/api/v1/ideas?status=submitted`, {
+    const ideasRes = await apiFetch(`${baseUrl}/api/v1/ideas?status=submitted`, {
       headers: authHeaders,
     });
     if (!ideasRes.ok) {
@@ -138,7 +256,7 @@ async function main() {
 
     // 3. Trigger live report generation
     console.log('[smoke] 3. Calling POST /api/v1/reports/generate...');
-    const genRes = await fetch(`${baseUrl}/api/v1/reports/generate`, {
+    const genRes = await apiFetch(`${baseUrl}/api/v1/reports/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -161,7 +279,7 @@ async function main() {
     let finalReport: Record<string, unknown> | null = null;
 
     while (Date.now() < pollDeadline) {
-      const pollRes = await fetch(`${baseUrl}/api/v1/reports/${reportId}`, {
+      const pollRes = await apiFetch(`${baseUrl}/api/v1/reports/${reportId}`, {
         headers: authHeaders,
       });
       if (!pollRes.ok) {
@@ -233,7 +351,7 @@ async function main() {
 
     // 6. Fetch and verify PDF
     console.log('[smoke] 6. Fetching GET /api/v1/reports/:id/pdf...');
-    const pdfRes = await fetch(`${baseUrl}/api/v1/reports/${reportId}/pdf`, {
+    const pdfRes = await apiFetch(`${baseUrl}/api/v1/reports/${reportId}/pdf`, {
       headers: authHeaders,
     });
     if (!pdfRes.ok) {
@@ -252,11 +370,11 @@ async function main() {
 
     // 7. Phase 3a — Financial Planner calculate, save, dashboard check, edit, delete
     console.log('[smoke] 7. Testing Phase 3a Financial Planner (/api/v1/finance)...');
-    const startupsRes = await fetch(`${baseUrl}/api/v1/startups`, { headers: authHeaders });
+    const startupsRes = await apiFetch(`${baseUrl}/api/v1/startups`, { headers: authHeaders });
     const startupsData = (await startupsRes.json()) as { items?: Array<{ id: string }> };
     const startupId = startupsData.items?.[0]?.id ?? null;
 
-    const finCreateRes = await fetch(`${baseUrl}/api/v1/finance`, {
+    const finCreateRes = await apiFetch(`${baseUrl}/api/v1/finance`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -311,7 +429,7 @@ async function main() {
 
     // 8. Verify Dashboard Financial Overview reflects real saved plan
     console.log('[smoke] 8. Verifying Dashboard financialOverview...');
-    const dashRes = await fetch(`${baseUrl}/api/v1/dashboard`, { headers: authHeaders });
+    const dashRes = await apiFetch(`${baseUrl}/api/v1/dashboard`, { headers: authHeaders });
     if (!dashRes.ok) {
       throw new Error(`Dashboard fetch failed (HTTP ${dashRes.status})`);
     }
@@ -322,7 +440,7 @@ async function main() {
       throw new Error('Dashboard financialOverview did not reflect the latest saved plan.');
     }
 
-    const finPatchRes = await fetch(`${baseUrl}/api/v1/finance/${finData.plan.id}`, {
+    const finPatchRes = await apiFetch(`${baseUrl}/api/v1/finance/${finData.plan.id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -345,7 +463,7 @@ async function main() {
     if (!finPatchRes.ok) {
       throw new Error(`Finance update failed (HTTP ${finPatchRes.status}): ${await finPatchRes.text()}`);
     }
-    const finDelRes = await fetch(`${baseUrl}/api/v1/finance/${finData.plan.id}`, {
+    const finDelRes = await apiFetch(`${baseUrl}/api/v1/finance/${finData.plan.id}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
@@ -356,7 +474,7 @@ async function main() {
 
     // 9. Phase 3a — Customer Personas generate, verify disclaimer & fields, edit, delete
     console.log('[smoke] 9. Testing Phase 3a Customer Personas (/api/v1/personas)...');
-    const persGenRes = await fetch(`${baseUrl}/api/v1/personas/generate`, {
+    const persGenRes = await apiFetch(`${baseUrl}/api/v1/personas/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -411,7 +529,7 @@ async function main() {
       throw new Error('Generated persona missing one or more required output fields.');
     }
 
-    const persPatchRes = await fetch(`${baseUrl}/api/v1/personas/${p.id}`, {
+    const persPatchRes = await apiFetch(`${baseUrl}/api/v1/personas/${p.id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -437,7 +555,7 @@ async function main() {
       throw new Error(`Persona update failed (HTTP ${persPatchRes.status}): ${await persPatchRes.text()}`);
     }
 
-    const persDelRes = await fetch(`${baseUrl}/api/v1/personas/${p.id}`, {
+    const persDelRes = await apiFetch(`${baseUrl}/api/v1/personas/${p.id}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
@@ -448,7 +566,7 @@ async function main() {
 
     // 10. Phase 3b — Market Research (/api/v1/research)
     console.log('[smoke] 10. Testing Phase 3b Market Research (/api/v1/research)...');
-    const resCreateRes = await fetch(`${baseUrl}/api/v1/research`, {
+    const resCreateRes = await apiFetch(`${baseUrl}/api/v1/research`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -486,13 +604,13 @@ async function main() {
       throw new Error('Expected completed research run with summary.');
     }
 
-    const resGetRes = await fetch(`${baseUrl}/api/v1/research/${run.id}`, {
+    const resGetRes = await apiFetch(`${baseUrl}/api/v1/research/${run.id}`, {
       headers: authHeaders,
     });
     if (!resGetRes.ok) {
       throw new Error(`Research reopen failed (HTTP ${resGetRes.status})`);
     }
-    const resDelRes = await fetch(`${baseUrl}/api/v1/research/${run.id}`, {
+    const resDelRes = await apiFetch(`${baseUrl}/api/v1/research/${run.id}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
@@ -505,7 +623,7 @@ async function main() {
 
     // 11. Phase 3b — Competitor Analysis (/api/v1/competitors)
     console.log('[smoke] 11. Testing Phase 3b Competitor Analysis (/api/v1/competitors)...');
-    const compCreateRes = await fetch(`${baseUrl}/api/v1/competitors`, {
+    const compCreateRes = await apiFetch(`${baseUrl}/api/v1/competitors`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -531,7 +649,7 @@ async function main() {
     const compCreated = JSON.parse(compCreateText) as { competitor: { id: string } };
     const compId = compCreated.competitor.id;
 
-    const compPatchRes = await fetch(`${baseUrl}/api/v1/competitors/${compId}`, {
+    const compPatchRes = await apiFetch(`${baseUrl}/api/v1/competitors/${compId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -551,7 +669,7 @@ async function main() {
       throw new Error(`Competitor patch failed (HTTP ${compPatchRes.status}): ${await compPatchRes.text()}`);
     }
 
-    const diffRes = await fetch(`${baseUrl}/api/v1/competitors/differentiate`, {
+    const diffRes = await apiFetch(`${baseUrl}/api/v1/competitors/differentiate`, {
       method: 'POST',
       headers: authHeaders,
     });
@@ -571,7 +689,7 @@ async function main() {
       throw new Error('Expected differentiation opportunities labelled AI interpretation.');
     }
 
-    const discRes = await fetch(`${baseUrl}/api/v1/competitors/discover`, {
+    const discRes = await apiFetch(`${baseUrl}/api/v1/competitors/discover`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -593,14 +711,14 @@ async function main() {
     } else {
       const discJson = (await discRes.json()) as { items?: Array<{ id: string }> };
       for (const item of discJson.items || []) {
-        await fetch(`${baseUrl}/api/v1/competitors/${item.id}`, {
+        await apiFetch(`${baseUrl}/api/v1/competitors/${item.id}`, {
           method: 'DELETE',
           headers: authHeaders,
         });
       }
     }
 
-    const compDelRes = await fetch(`${baseUrl}/api/v1/competitors/${compId}`, {
+    const compDelRes = await apiFetch(`${baseUrl}/api/v1/competitors/${compId}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
@@ -611,7 +729,7 @@ async function main() {
 
     // 12. Phase 4 — Leads CRUD, Notes Timeline, CSV Import & Formula Guard, Stage Move, Dashboard Counts
     console.log('[smoke] 12. Testing Phase 4 Leads & Pipeline (/api/v1/leads)...');
-    const leadCreateRes = await fetch(`${baseUrl}/api/v1/leads`, {
+    const leadCreateRes = await apiFetch(`${baseUrl}/api/v1/leads`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -635,7 +753,7 @@ async function main() {
     const leadCreated = JSON.parse(leadCreateText) as { lead: { id: string } };
     const leadId = leadCreated.lead.id;
 
-    const noteRes = await fetch(`${baseUrl}/api/v1/leads/${leadId}/notes`, {
+    const noteRes = await apiFetch(`${baseUrl}/api/v1/leads/${leadId}/notes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -647,7 +765,7 @@ async function main() {
       throw new Error(`Lead note failed (HTTP ${noteRes.status}): ${await noteRes.text()}`);
     }
 
-    const stageRes = await fetch(`${baseUrl}/api/v1/leads/${leadId}/stage`, {
+    const stageRes = await apiFetch(`${baseUrl}/api/v1/leads/${leadId}/stage`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -666,7 +784,7 @@ async function main() {
       throw new Error('Lead stage move to Converted did not update lead or summary.');
     }
 
-    const csvImportRes = await fetch(`${baseUrl}/api/v1/leads/import`, {
+    const csvImportRes = await apiFetch(`${baseUrl}/api/v1/leads/import`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -695,7 +813,7 @@ async function main() {
       throw new Error(`Unexpected CSV import guard outcome: ${JSON.stringify(csvImportData)}`);
     }
 
-    const dash4Res = await fetch(`${baseUrl}/api/v1/dashboard`, { headers: authHeaders });
+    const dash4Res = await apiFetch(`${baseUrl}/api/v1/dashboard`, { headers: authHeaders });
     const dash4Data = (await dash4Res.json()) as {
       summary?: { totalLeads?: number; leadsByStage?: Record<string, number> };
     };
@@ -703,7 +821,7 @@ async function main() {
       throw new Error('Dashboard did not reflect real lead counts by stage.');
     }
 
-    const csvExportRes = await fetch(`${baseUrl}/api/v1/leads/export.csv`, {
+    const csvExportRes = await apiFetch(`${baseUrl}/api/v1/leads/export.csv`, {
       headers: authHeaders,
     });
     if (!csvExportRes.ok || !(csvExportRes.headers.get('content-type') || '').includes('text/csv')) {
@@ -714,7 +832,7 @@ async function main() {
       throw new Error('Exported CSV missing created lead.');
     }
 
-    const leadDelRes = await fetch(`${baseUrl}/api/v1/leads/${leadId}`, {
+    const leadDelRes = await apiFetch(`${baseUrl}/api/v1/leads/${leadId}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
@@ -725,7 +843,7 @@ async function main() {
 
     // 13. Phase 4 — Marketing Strategy generate, budget allocation sum=100%/budget, edit, delete
     console.log('[smoke] 13. Testing Phase 4 Marketing Strategy (/api/v1/marketing)...');
-    const mktRes = await fetch(`${baseUrl}/api/v1/marketing/generate`, {
+    const mktRes = await apiFetch(`${baseUrl}/api/v1/marketing/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -770,7 +888,7 @@ async function main() {
       throw new Error(`Marketing budget verification failed (pctSum=${pctSum}, amtSum=${amtSum}).`);
     }
 
-    const mktPatchRes = await fetch(`${baseUrl}/api/v1/marketing/${camp.id}`, {
+    const mktPatchRes = await apiFetch(`${baseUrl}/api/v1/marketing/${camp.id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -786,7 +904,7 @@ async function main() {
     if (!mktPatchRes.ok) {
       throw new Error(`Marketing edit failed (HTTP ${mktPatchRes.status}): ${await mktPatchRes.text()}`);
     }
-    const mktDelRes = await fetch(`${baseUrl}/api/v1/marketing/${camp.id}`, {
+    const mktDelRes = await apiFetch(`${baseUrl}/api/v1/marketing/${camp.id}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
@@ -799,7 +917,7 @@ async function main() {
 
     // 14. Phase 4 — Sales Assistant generate, verify draft notice, edit, save, delete
     console.log('[smoke] 14. Testing Phase 4 Sales Assistant (/api/v1/sales)...');
-    const salesRes = await fetch(`${baseUrl}/api/v1/sales/generate`, {
+    const salesRes = await apiFetch(`${baseUrl}/api/v1/sales/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -837,7 +955,7 @@ async function main() {
       throw new Error('Sales playbook missing required draft notice or drafts.');
     }
 
-    const salesPatchRes = await fetch(`${baseUrl}/api/v1/sales/${pb.id}`, {
+    const salesPatchRes = await apiFetch(`${baseUrl}/api/v1/sales/${pb.id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -856,7 +974,7 @@ async function main() {
     if (!salesPatchRes.ok) {
       throw new Error(`Sales edit failed (HTTP ${salesPatchRes.status}): ${await salesPatchRes.text()}`);
     }
-    const salesDelRes = await fetch(`${baseUrl}/api/v1/sales/${pb.id}`, {
+    const salesDelRes = await apiFetch(`${baseUrl}/api/v1/sales/${pb.id}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
