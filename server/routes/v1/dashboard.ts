@@ -89,6 +89,58 @@ router.get(
       .prepare('SELECT COUNT(*) as savedSalesPlaybooks FROM sales_playbooks WHERE user_id = ?')
       .get(userId) as { savedSalesPlaybooks: number };
 
+    const taskStats = db
+      .prepare(
+        `SELECT
+           COUNT(*) as totalTasks,
+           SUM(CASE WHEN status != 'completed' THEN 1 ELSE 0 END) as pendingTasks,
+           SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedTasks
+         FROM tasks
+         WHERE user_id = ?`,
+      )
+      .get(userId) as {
+        totalTasks: number;
+        pendingTasks: number | null;
+        completedTasks: number | null;
+      };
+
+    const totalTasks = taskStats.totalTasks ?? 0;
+    const pendingTasks = taskStats.pendingTasks ?? 0;
+    const completedTasks = taskStats.completedTasks ?? 0;
+    const taskCompletionRate =
+      totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+    const upcomingTasks = db
+      .prepare(
+        `SELECT id, title, priority, status, due_date as dueDate, start_date as startDate
+         FROM tasks
+         WHERE user_id = ? AND status != 'completed'
+         ORDER BY due_date ASC NULLS LAST, created_at DESC
+         LIMIT 5`,
+      )
+      .all(userId) as Array<{
+        id: string;
+        title: string;
+        priority: string;
+        status: string;
+        dueDate: string | null;
+        startDate: string | null;
+      }>;
+
+    const expenseStats = db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(amount), 0) as totalExpenses,
+           COUNT(*) as expenseCount
+         FROM expenses
+         WHERE user_id = ?`,
+      )
+      .get(userId) as { totalExpenses: number; expenseCount: number };
+
+    const roadmapStats = db
+      .prepare('SELECT COUNT(*) as savedRoadmaps FROM roadmap_plans WHERE user_id = ?')
+      .get(userId) as { savedRoadmaps: number };
+
     const latestPlanRow = db
       .prepare(
         `SELECT fp.id, fp.name, fp.computed_json, fp.updated_at,
@@ -201,7 +253,14 @@ router.get(
         leadsByStage,
         savedMarketingCampaigns: marketingStats.savedMarketingCampaigns ?? 0,
         savedSalesPlaybooks: salesStats.savedSalesPlaybooks ?? 0,
+        totalTasks,
+        pendingTasks,
+        completedTasks,
+        taskCompletionRate,
+        totalExpenses: expenseStats.totalExpenses ?? 0,
+        savedRoadmaps: roadmapStats.savedRoadmaps ?? 0,
       },
+      upcomingTasks,
       financialOverview,
       recentIdeas,
       recentStartups,

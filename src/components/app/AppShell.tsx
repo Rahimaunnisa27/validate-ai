@@ -2,7 +2,9 @@ import {
   Activity,
   Briefcase,
   Calculator,
+  CheckSquare,
   ChevronDown,
+  Compass,
   FileCheck2,
   FilePlus2,
   Handshake,
@@ -11,6 +13,7 @@ import {
   LogOut,
   Megaphone,
   Menu,
+  Receipt,
   Search,
   Settings,
   Swords,
@@ -38,12 +41,14 @@ const WORKSPACE_NAV = [
   { to: '/leads', label: 'Leads & Pipeline', icon: UserCheck },
   { to: '/marketing', label: 'Marketing Strategy', icon: Megaphone },
   { to: '/sales', label: 'Sales Assistant', icon: Handshake },
+  { to: '/roadmap', label: 'Startup Roadmap', icon: Compass },
+  { to: '/tasks', label: 'Tasks & Execution', icon: CheckSquare },
+  { to: '/expenses', label: 'Expense Tracker', icon: Receipt },
   { to: '/settings', label: 'Profile & Settings', icon: Settings },
   { to: '/integrations', label: 'Integration Status', icon: Activity },
 ];
 
 const UPCOMING_PHASES = [
-  { phase: 'Phase 5', items: 'Roadmap, Tasks, Expenses' },
   { phase: 'Phase 6', items: 'Razorpay Payments & History' },
 ];
 

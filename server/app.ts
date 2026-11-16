@@ -15,9 +15,12 @@ import { createPersonasRouter, type PersonasRouterOptions } from './routes/v1/pe
 import plansRouter from './routes/v1/plans.ts';
 import { createReportsRouter, type ReportsRouterOptions } from './routes/v1/reports.ts';
 import { createResearchRouter, type ResearchRouterOptions } from './routes/v1/research.ts';
+import { createRoadmapRouter, type RoadmapRouterOptions } from './routes/v1/roadmap.ts';
 import { createSalesRouter, type SalesRouterOptions } from './routes/v1/sales.ts';
 import startupsRouter from './routes/v1/startups.ts';
 import systemRouter from './routes/v1/system.ts';
+import tasksRouter from './routes/v1/tasks.ts';
+import expensesRouter from './routes/v1/expenses.ts';
 import usersRouter from './routes/v1/users.ts';
 import { runGeminiStartupCheck } from './services/llmClient.ts';
 import { errorMiddleware, sendError } from './utils/errors.ts';
@@ -31,6 +34,7 @@ export function createApiApp(options?: {
   competitorsOptions?: CompetitorsRouterOptions;
   marketingOptions?: MarketingRouterOptions;
   salesOptions?: SalesRouterOptions;
+  roadmapOptions?: RoadmapRouterOptions;
 }) {
   initDatabase(options?.dbPath);
   if (process.env.NODE_ENV !== 'test') {
@@ -76,7 +80,7 @@ export function createApiApp(options?: {
   app.use(cookieParser());
 
   app.get('/api/v1/health', (_req, res) => {
-    res.json({ ok: true, service: 'venturepilot-api', phase: '4' });
+    res.json({ ok: true, service: 'venturepilot-api', phase: '5' });
   });
 
   app.use('/api/v1/auth', authRouter);
@@ -91,6 +95,9 @@ export function createApiApp(options?: {
   app.use('/api/v1/leads', leadsRouter);
   app.use('/api/v1/marketing', createMarketingRouter(options?.marketingOptions));
   app.use('/api/v1/sales', createSalesRouter(options?.salesOptions));
+  app.use('/api/v1/roadmap', createRoadmapRouter(options?.roadmapOptions));
+  app.use('/api/v1/tasks', tasksRouter);
+  app.use('/api/v1/expenses', expensesRouter);
   app.use('/api/v1/dashboard', dashboardRouter);
   app.use('/api/v1/plans', plansRouter);
   app.use('/api/v1/contact', contactRouter);

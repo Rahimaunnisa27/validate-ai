@@ -982,7 +982,239 @@ async function main() {
       throw new Error(`Sales delete failed (HTTP ${salesDelRes.status})`);
     }
     console.log('[smoke]    Verified sales assistant generate/notice/edit/save/delete.');
-    console.log('[smoke] PASS: Live end-to-end Phase 2 + Phase 3a + Phase 3b + Phase 4 smoke suite succeeded!');
+
+    // 15. Phase 5 — Tasks CRUD, Kanban status change, priority filtering, edit, delete
+    console.log('[smoke] 15. Testing Phase 5 Tasks & Kanban (/api/v1/tasks)...');
+    const taskCreateRes = await apiFetch(`${baseUrl}/api/v1/tasks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        ideaId: idea.id,
+        title: 'Smoke Test Regulatory Compliance Check',
+        description: 'Verify regional temperature reporting guidelines',
+        priority: 'high',
+        startDate: '2026-11-20',
+        dueDate: '2026-11-28',
+        status: 'todo',
+        notes: 'Created during smoke test',
+        expectedOutcome: 'Checklist drafted',
+      }),
+    });
+    const taskCreateText = await taskCreateRes.text();
+    if (!taskCreateRes.ok) {
+      throw new Error(`Task create failed (HTTP ${taskCreateRes.status}): ${taskCreateText}`);
+    }
+    const taskData = JSON.parse(taskCreateText) as { task: { id: string; status: string; priority: string } };
+    const taskId = taskData.task.id;
+
+    const taskStatusRes = await apiFetch(`${baseUrl}/api/v1/tasks/${taskId}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({ status: 'in_progress', sortOrder: 1 }),
+    });
+    if (!taskStatusRes.ok) {
+      throw new Error(`Task status update failed (HTTP ${taskStatusRes.status}): ${await taskStatusRes.text()}`);
+    }
+
+    const taskFilterRes = await apiFetch(`${baseUrl}/api/v1/tasks?priority=high`, {
+      headers: authHeaders,
+    });
+    if (!taskFilterRes.ok) {
+      throw new Error(`Task list failed (HTTP ${taskFilterRes.status})`);
+    }
+    const taskFilterData = (await taskFilterRes.json()) as { items: Array<{ id: string }> };
+    if (!taskFilterData.items.some((t) => t.id === taskId)) {
+      throw new Error('Created task not found in priority-filtered task list.');
+    }
+
+    const taskPatchRes = await apiFetch(`${baseUrl}/api/v1/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        title: 'Smoke Test Regulatory Compliance Check (Updated)',
+        status: 'completed',
+      }),
+    });
+    if (!taskPatchRes.ok) {
+      throw new Error(`Task edit failed (HTTP ${taskPatchRes.status}): ${await taskPatchRes.text()}`);
+    }
+
+    const taskDelRes = await apiFetch(`${baseUrl}/api/v1/tasks/${taskId}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    if (!taskDelRes.ok) {
+      throw new Error(`Task delete failed (HTTP ${taskDelRes.status})`);
+    }
+    console.log('[smoke]    Verified tasks create/kanban-status/priority-filter/edit/delete.');
+
+    // 16. Phase 5 — Roadmap generation, tasks table syncing, completion %, cleanup
+    console.log('[smoke] 16. Testing Phase 5 Startup Roadmap (/api/v1/roadmap)...');
+    const roadmapGenRes = await apiFetch(`${baseUrl}/api/v1/roadmap/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        ideaId: idea.id,
+        durationDays: 30,
+        customFocus: 'Focus on cold-chain sensor deployment and FSSAI audit pilot',
+      }),
+    });
+    const roadmapGenText = await roadmapGenRes.text();
+    if (!roadmapGenRes.ok) {
+      throw new Error(`Roadmap generate failed (HTTP ${roadmapGenRes.status}): ${roadmapGenText}`);
+    }
+    const roadmapData = JSON.parse(roadmapGenText) as {
+      plan: { id: string; durationDays: number };
+      tasksCreatedCount: number;
+      evidenceLabel: string;
+    };
+    const planId = roadmapData.plan.id;
+    if (roadmapData.evidenceLabel !== 'AI interpretation' || roadmapData.tasksCreatedCount < 1) {
+      throw new Error('Roadmap response missing valid AI label or generated tasks.');
+    }
+
+    const roadmapGetRes = await apiFetch(`${baseUrl}/api/v1/roadmap/${planId}`, {
+      headers: authHeaders,
+    });
+    if (!roadmapGetRes.ok) {
+      throw new Error(`Roadmap get failed (HTTP ${roadmapGetRes.status})`);
+    }
+    const roadmapDetails = (await roadmapGetRes.json()) as {
+      tasks: Array<{ id: string; status: string }>;
+      completionPercentage: number;
+    };
+    if (roadmapDetails.tasks.length === 0 || roadmapDetails.completionPercentage !== 0) {
+      throw new Error('Roadmap tasks not properly synced to tasks table.');
+    }
+
+    // Complete 1 roadmap task
+    const sampleRoadmapTaskId = roadmapDetails.tasks[0].id;
+    await apiFetch(`${baseUrl}/api/v1/tasks/${sampleRoadmapTaskId}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({ status: 'completed' }),
+    });
+
+    const roadmapRecheckRes = await apiFetch(`${baseUrl}/api/v1/roadmap/${planId}`, {
+      headers: authHeaders,
+    });
+    const recheckData = (await roadmapRecheckRes.json()) as { completionPercentage: number };
+    if (recheckData.completionPercentage <= 0) {
+      throw new Error('Roadmap completion percentage did not increase after completing a task.');
+    }
+
+    const roadmapDelRes = await apiFetch(`${baseUrl}/api/v1/roadmap/${planId}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    if (!roadmapDelRes.ok) {
+      throw new Error(`Roadmap delete failed (HTTP ${roadmapDelRes.status})`);
+    }
+    console.log('[smoke]    Verified roadmap generation, task table syncing, timeline/completion %, and cleanup.');
+
+    // 17. Phase 5 — Expenses, Category Budgets, Budget vs Actual, Dashboard Sync
+    console.log('[smoke] 17. Testing Phase 5 Expense Tracker & Budgets (/api/v1/expenses)...');
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const expCreateRes = await apiFetch(`${baseUrl}/api/v1/expenses`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        amount: 8500,
+        category: 'Software & Tools',
+        date: new Date().toISOString().split('T')[0],
+        paymentMethod: 'Credit Card',
+        description: 'Smoke test cloud infrastructure',
+      }),
+    });
+    const expCreateText = await expCreateRes.text();
+    if (!expCreateRes.ok) {
+      throw new Error(`Expense create failed (HTTP ${expCreateRes.status}): ${expCreateText}`);
+    }
+    const expData = JSON.parse(expCreateText) as { expense: { id: string; amount: number } };
+    const expenseId = expData.expense.id;
+
+    const budgetSetRes = await apiFetch(`${baseUrl}/api/v1/expenses/budgets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        category: 'Software & Tools',
+        month: currentMonth,
+        amount: 20000,
+      }),
+    });
+    const budgetSetText = await budgetSetRes.text();
+    if (!budgetSetRes.ok) {
+      throw new Error(`Budget save failed (HTTP ${budgetSetRes.status}): ${budgetSetText}`);
+    }
+    const budgetData = JSON.parse(budgetSetText) as { budget: { id: string } };
+    const budgetId = budgetData.budget.id;
+
+    const budgetCompRes = await apiFetch(`${baseUrl}/api/v1/expenses/budgets?month=${currentMonth}`, {
+      headers: authHeaders,
+    });
+    if (!budgetCompRes.ok) {
+      throw new Error(`Budget comparison failed (HTTP ${budgetCompRes.status})`);
+    }
+    const budgetCompData = (await budgetCompRes.json()) as {
+      comparison: Array<{ category: string; budgeted: number; actual: number; variance: number }>;
+    };
+    const compItem = budgetCompData.comparison.find((c) => c.category === 'Software & Tools');
+    if (!compItem || compItem.budgeted !== 20000 || compItem.actual < 8500) {
+      throw new Error(`Unexpected budget comparison: ${JSON.stringify(compItem)}`);
+    }
+
+    // Verify Dashboard reflect total expenses
+    const dash5Res = await apiFetch(`${baseUrl}/api/v1/dashboard`, { headers: authHeaders });
+    if (!dash5Res.ok) {
+      throw new Error(`Dashboard fetch failed (HTTP ${dash5Res.status})`);
+    }
+    const dash5Data = (await dash5Res.json()) as {
+      summary?: { totalExpenses?: number };
+    };
+    if ((dash5Data.summary?.totalExpenses ?? 0) < 8500) {
+      throw new Error('Dashboard summary did not reflect created expenses.');
+    }
+
+    // Clean up expense and budget
+    const expDelRes = await apiFetch(`${baseUrl}/api/v1/expenses/${expenseId}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    if (!expDelRes.ok) {
+      throw new Error(`Expense delete failed (HTTP ${expDelRes.status})`);
+    }
+
+    const budgetDelRes = await apiFetch(`${baseUrl}/api/v1/expenses/budgets/${budgetId}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    if (!budgetDelRes.ok) {
+      throw new Error(`Budget delete failed (HTTP ${budgetDelRes.status})`);
+    }
+    console.log('[smoke]    Verified expense record, category budget, budget vs actual, dashboard sync, and cleanup.');
+
+    console.log('[smoke] PASS: Live end-to-end Phase 2 + Phase 3a + Phase 3b + Phase 4 + Phase 5 smoke suite succeeded!');
   } finally {
     if (child) {
       child.kill('SIGTERM');

@@ -15,9 +15,12 @@ import { PersonasPage } from './pages/app/PersonasPage.tsx';
 import { ReportsListPage } from './pages/app/ReportsListPage.tsx';
 import { ReportViewerPage } from './pages/app/ReportViewerPage.tsx';
 import { ResearchPage } from './pages/app/ResearchPage.tsx';
+import { RoadmapPage } from './pages/app/RoadmapPage.tsx';
 import { SalesPage } from './pages/app/SalesPage.tsx';
 import { SettingsPage } from './pages/app/SettingsPage.tsx';
 import { StartupsPage } from './pages/app/StartupsPage.tsx';
+import { TasksPage } from './pages/app/TasksPage.tsx';
+import { ExpensesPage } from './pages/app/ExpensesPage.tsx';
 import {
   ForgotPasswordPage,
   LoginPage,
@@ -178,6 +181,30 @@ export default function App() {
             element={
               <RequireAuth>
                 <SalesPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/roadmap"
+            element={
+              <RequireAuth>
+                <RoadmapPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tasks"
+            element={
+              <RequireAuth>
+                <TasksPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/expenses"
+            element={
+              <RequireAuth>
+                <ExpensesPage />
               </RequireAuth>
             }
           />

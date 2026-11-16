@@ -340,6 +340,85 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_sales_playbooks_user_created ON sales_playbooks(user_id, created_at DESC);
     `,
   },
+  {
+    id: '006_phase5_roadmap_tasks_expenses',
+    sql: `
+      CREATE TABLE IF NOT EXISTS roadmap_plans (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        idea_id TEXT,
+        report_id TEXT,
+        title TEXT NOT NULL,
+        duration_days INTEGER NOT NULL CHECK (duration_days IN (30, 60, 90)),
+        summary TEXT NOT NULL DEFAULT '',
+        phases_json TEXT NOT NULL,
+        key_risks_json TEXT NOT NULL DEFAULT '[]',
+        evidence_label TEXT NOT NULL DEFAULT 'AI interpretation',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE SET NULL,
+        FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_roadmap_plans_user_created ON roadmap_plans(user_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        idea_id TEXT,
+        roadmap_plan_id TEXT,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')) DEFAULT 'medium',
+        start_date TEXT,
+        due_date TEXT,
+        status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'completed')) DEFAULT 'todo',
+        notes TEXT NOT NULL DEFAULT '',
+        expected_outcome TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE SET NULL,
+        FOREIGN KEY (roadmap_plan_id) REFERENCES roadmap_plans(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_created ON tasks(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_user_due_date ON tasks(user_id, due_date);
+      CREATE INDEX IF NOT EXISTS idx_tasks_roadmap ON tasks(roadmap_plan_id);
+
+      CREATE TABLE IF NOT EXISTS expenses (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        startup_id TEXT,
+        amount REAL NOT NULL CHECK (amount > 0),
+        category TEXT NOT NULL,
+        date TEXT NOT NULL,
+        payment_method TEXT NOT NULL DEFAULT 'Other',
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (startup_id) REFERENCES startups(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_expenses_user_created ON expenses(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, date DESC);
+      CREATE INDEX IF NOT EXISTS idx_expenses_user_category ON expenses(user_id, category);
+
+      CREATE TABLE IF NOT EXISTS expense_budgets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        month TEXT NOT NULL,
+        amount REAL NOT NULL CHECK (amount > 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE (user_id, category, month)
+      );
+      CREATE INDEX IF NOT EXISTS idx_expense_budgets_user_month ON expense_budgets(user_id, month);
+    `,
+  },
 ];
 
 function seedReportPlans(db: Database.Database): void {

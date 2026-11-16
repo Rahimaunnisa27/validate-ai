@@ -3,12 +3,16 @@ import {
   ArrowRight,
   Briefcase,
   Calculator,
+  CheckSquare,
+  Clock,
+  Compass,
   FileCheck2,
   FilePlus2,
   Handshake,
   Lightbulb,
   Megaphone,
   Plus,
+  Receipt,
   Search,
   Swords,
   UserCheck,
@@ -94,16 +98,6 @@ export function DashboardPage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-border-hairline bg-surface-canvas p-5">
-                <p className="text-xs font-medium text-ink-muted">Active Startups</p>
-                <p className="mt-2 font-display text-2xl font-bold text-ink-primary tabular-nums">
-                  {data.summary.activeStartups}
-                </p>
-                <p className="mt-1 text-xs text-ink-secondary">
-                  Organized in your workspace
-                </p>
-              </div>
-
               <Link
                 to="/reports"
                 className="rounded-xl border border-border-hairline bg-surface-canvas p-5 hover:border-brand-primary/50 transition-colors block"
@@ -117,15 +111,31 @@ export function DashboardPage() {
                 </p>
               </Link>
 
-              <div className="rounded-xl border border-border-hairline bg-surface-canvas p-5">
-                <p className="text-xs font-medium text-ink-muted">Drafts In Progress</p>
+              <Link
+                to="/tasks"
+                className="rounded-xl border border-border-hairline bg-surface-canvas p-5 hover:border-brand-primary/50 transition-colors block"
+              >
+                <p className="text-xs font-medium text-ink-muted">Pending Tasks</p>
                 <p className="mt-2 font-display text-2xl font-bold text-brand-primary tabular-nums">
-                  {data.summary.draftIdeas}
+                  {data.summary.pendingTasks ?? 0}
                 </p>
-                <p className="mt-1 text-xs text-ink-secondary">
-                  Autosaved step-by-step
+                <p className="mt-1 text-xs text-ink-secondary tabular-nums">
+                  {data.summary.taskCompletionRate ?? 0}% completed ({data.summary.completedTasks ?? 0} done)
                 </p>
-              </div>
+              </Link>
+
+              <Link
+                to="/expenses"
+                className="rounded-xl border border-border-hairline bg-surface-canvas p-5 hover:border-brand-primary/50 transition-colors block"
+              >
+                <p className="text-xs font-medium text-ink-muted">Total Expenses</p>
+                <p className="mt-2 font-display text-2xl font-bold text-ink-primary tabular-nums">
+                  {formatInr(data.summary.totalExpenses ?? 0)}
+                </p>
+                <p className="mt-1 text-xs text-brand-primary font-medium">
+                  Manage budgets &amp; expenses
+                </p>
+              </Link>
             </div>
 
             {/* Financial Overview Card (Real Saved-Plan Data) */}
@@ -246,6 +256,89 @@ export function DashboardPage() {
               </div>
             </section>
 
+            {/* Tasks & Roadmap Execution Overview (Real Task Counts & Deadlines) */}
+            <section className="rounded-xl border border-border-hairline bg-surface-canvas p-5 shadow-2xs">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <CheckSquare className="h-4 w-4 text-brand-primary" aria-hidden="true" />
+                  <div>
+                    <h3 className="font-display text-sm font-bold text-ink-primary">
+                      Tasks &amp; Roadmap Execution
+                    </h3>
+                    <p className="text-xs text-ink-muted tabular-nums">
+                      {data.summary.totalTasks ?? 0} total tasks · {data.summary.pendingTasks ?? 0} pending · {data.summary.completedTasks ?? 0} completed · {data.summary.savedRoadmaps ?? 0} saved roadmaps
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to="/roadmap"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border-hairline px-3 py-1.5 text-xs font-medium text-ink-primary hover:bg-surface-subtle transition-colors"
+                  >
+                    <Compass className="h-3.5 w-3.5 text-brand-primary" />
+                    Roadmap
+                  </Link>
+                  <Link
+                    to="/tasks"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border-hairline px-3 py-1.5 text-xs font-medium text-ink-primary hover:bg-surface-subtle transition-colors"
+                  >
+                    Open Task Board
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="mt-4 pt-3 border-t border-border-hairline">
+                <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
+                  <span className="text-ink-secondary">Task Completion Rate</span>
+                  <span className="text-ink-primary font-bold tabular-nums">
+                    {data.summary.taskCompletionRate ?? 0}%
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-surface-subtle overflow-hidden border border-border-hairline">
+                  <div
+                    className="h-full bg-brand-primary rounded-full transition-all duration-500"
+                    style={{ width: `${data.summary.taskCompletionRate ?? 0}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Upcoming Tasks preview */}
+              {data.upcomingTasks && data.upcomingTasks.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+                    Upcoming Tasks &amp; Deadlines
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {data.upcomingTasks.map((t) => (
+                      <Link
+                        key={t.id}
+                        to="/tasks"
+                        className="flex flex-col justify-between rounded-lg border border-border-hairline bg-surface-subtle p-3 hover:border-brand-primary/40 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.2 rounded bg-surface-canvas border border-border-hairline text-ink-secondary">
+                            {t.priority}
+                          </span>
+                          <span className="text-[10px] text-ink-muted">
+                            {t.dueDate ? `Due ${t.dueDate}` : 'No due date'}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-xs font-semibold text-ink-primary line-clamp-1">
+                          {t.title}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-ink-secondary">
+                  No pending tasks. Head to <Link to="/roadmap" className="text-brand-primary font-semibold hover:underline">Roadmap</Link> to generate an execution plan or create tasks in the <Link to="/tasks" className="text-brand-primary font-semibold hover:underline">Task Manager</Link>.
+                </p>
+              )}
+            </section>
+
             {/* Quick Actions */}
             <section>
               <h3 className="text-sm font-semibold text-ink-primary mb-3">Quick Actions</h3>
@@ -345,6 +438,39 @@ export function DashboardPage() {
                   <div className="flex items-center gap-3">
                     <Handshake className="h-4 w-4 text-brand-accent" aria-hidden="true" />
                     <span className="text-sm font-medium text-ink-primary">Sales Assistant</span>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-ink-muted" aria-hidden="true" />
+                </Link>
+
+                <Link
+                  to="/roadmap"
+                  className="flex items-center justify-between rounded-xl border border-border-hairline bg-surface-canvas p-4 hover:border-brand-primary/50 hover:bg-surface-subtle transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Compass className="h-4 w-4 text-brand-primary" aria-hidden="true" />
+                    <span className="text-sm font-medium text-ink-primary">Startup Roadmap</span>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-ink-muted" aria-hidden="true" />
+                </Link>
+
+                <Link
+                  to="/tasks"
+                  className="flex items-center justify-between rounded-xl border border-border-hairline bg-surface-canvas p-4 hover:border-brand-primary/50 hover:bg-surface-subtle transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckSquare className="h-4 w-4 text-brand-secondary" aria-hidden="true" />
+                    <span className="text-sm font-medium text-ink-primary">Tasks &amp; Execution</span>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-ink-muted" aria-hidden="true" />
+                </Link>
+
+                <Link
+                  to="/expenses"
+                  className="flex items-center justify-between rounded-xl border border-border-hairline bg-surface-canvas p-4 hover:border-brand-primary/50 hover:bg-surface-subtle transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Receipt className="h-4 w-4 text-brand-accent" aria-hidden="true" />
+                    <span className="text-sm font-medium text-ink-primary">Expense Tracker</span>
                   </div>
                   <ArrowRight className="h-4 w-4 text-ink-muted" aria-hidden="true" />
                 </Link>

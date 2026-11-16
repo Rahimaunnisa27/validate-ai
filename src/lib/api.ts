@@ -29,6 +29,26 @@ import type {
   SalesInput,
   SalesPlaybookJson,
 } from '../shared/phase4Schemas.ts';
+import type {
+  BudgetVsActualComparison,
+  ExpenseBudgetInput,
+  ExpenseBudgetRecord,
+  ExpenseCategory,
+  ExpenseInput,
+  ExpenseRecord,
+  ExpenseSummary,
+  ExpenseUpdateInput,
+  PaymentMethod,
+  RoadmapDuration,
+  RoadmapGenerateRequest,
+  RoadmapPlanRecord,
+  TaskInput,
+  TaskPriority,
+  TaskRecord,
+  TaskStatus,
+  TaskStatusUpdateInput,
+  TaskUpdateInput,
+} from '../shared/phase5Schemas.ts';
 
 export interface User {
   id: string;
@@ -365,7 +385,21 @@ export interface DashboardData {
     leadsByStage?: Record<LeadStage, number>;
     savedMarketingCampaigns?: number;
     savedSalesPlaybooks?: number;
+    totalTasks?: number;
+    pendingTasks?: number;
+    completedTasks?: number;
+    taskCompletionRate?: number;
+    totalExpenses?: number;
+    savedRoadmaps?: number;
   };
+  upcomingTasks?: Array<{
+    id: string;
+    title: string;
+    priority: TaskPriority;
+    status: TaskStatus;
+    dueDate: string | null;
+    startDate: string | null;
+  }>;
   financialOverview?: DashboardFinancialOverview | null;
   recentIdeas: Array<{
     id: string;
@@ -904,6 +938,108 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/sales/${id}`, { method: 'DELETE' }),
+  },
+  tasks: {
+    list: (query?: {
+      status?: string;
+      priority?: string;
+      ideaId?: string;
+      roadmapPlanId?: string;
+      search?: string;
+    }) => {
+      const sp = new URLSearchParams();
+      if (query?.status) sp.set('status', query.status);
+      if (query?.priority) sp.set('priority', query.priority);
+      if (query?.ideaId) sp.set('ideaId', query.ideaId);
+      if (query?.roadmapPlanId) sp.set('roadmapPlanId', query.roadmapPlanId);
+      if (query?.search) sp.set('search', query.search);
+      const qs = sp.toString();
+      return request<{ items: TaskRecord[] }>(`/tasks${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}`),
+    create: (body: TaskInput) =>
+      request<{ task: TaskRecord }>('/tasks', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    update: (id: string, body: TaskUpdateInput) =>
+      request<{ task: TaskRecord }>(`/tasks/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    updateStatus: (id: string, body: TaskStatusUpdateInput) =>
+      request<{ task: TaskRecord }>(`/tasks/${id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
+  },
+  roadmap: {
+    list: (query?: { ideaId?: string }) => {
+      const sp = new URLSearchParams();
+      if (query?.ideaId) sp.set('ideaId', query.ideaId);
+      const qs = sp.toString();
+      return request<{ items: RoadmapPlanRecord[] }>(`/roadmap${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) =>
+      request<{
+        plan: RoadmapPlanRecord;
+        tasks: TaskRecord[];
+        completionPercentage: number;
+      }>(`/roadmap/${id}`),
+    generate: (body: RoadmapGenerateRequest) =>
+      request<{
+        plan: RoadmapPlanRecord;
+        tasksCreatedCount: number;
+        evidenceLabel: 'AI interpretation';
+      }>('/roadmap/generate', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/roadmap/${id}`, { method: 'DELETE' }),
+  },
+  expenses: {
+    list: (query?: { month?: string; category?: string }) => {
+      const sp = new URLSearchParams();
+      if (query?.month) sp.set('month', query.month);
+      if (query?.category) sp.set('category', query.category);
+      const qs = sp.toString();
+      return request<{ items: ExpenseRecord[]; summary: ExpenseSummary }>(
+        `/expenses${qs ? `?${qs}` : ''}`,
+      );
+    },
+    get: (id: string) => request<{ expense: ExpenseRecord }>(`/expenses/${id}`),
+    create: (body: ExpenseInput) =>
+      request<{ expense: ExpenseRecord }>('/expenses', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    update: (id: string, body: ExpenseUpdateInput) =>
+      request<{ expense: ExpenseRecord }>(`/expenses/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/expenses/${id}`, { method: 'DELETE' }),
+    budgets: (month?: string) => {
+      const sp = new URLSearchParams();
+      if (month) sp.set('month', month);
+      const qs = sp.toString();
+      return request<{
+        items: ExpenseBudgetRecord[];
+        comparison: BudgetVsActualComparison[];
+        selectedMonth: string;
+      }>(`/expenses/budgets${qs ? `?${qs}` : ''}`);
+    },
+    saveBudget: (body: ExpenseBudgetInput) =>
+      request<{ budget: ExpenseBudgetRecord }>('/expenses/budgets', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    deleteBudget: (id: string) =>
+      request<{ ok: boolean }>(`/expenses/budgets/${id}`, { method: 'DELETE' }),
   },
   plans: {
     list: () => request<{ plans: ReportPlan[] }>('/plans', {}, false),
